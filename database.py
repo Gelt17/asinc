@@ -1,28 +1,32 @@
-from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from models import Base
-import logging
-from config import Config
+import os
+from dotenv import load_dotenv
 
-logger = logging.getLogger(__name__)
+# Загружаем переменные окружения из .env файла
+load_dotenv()
 
+class AsyncDatabase:
+    def __init__(self):
+        self.engine = None
+        self.async_session = None
 
-def create_database():
-    try:
-        engine = create_engine(Config.DATABASE_URL)
-        with engine.connect():
-            logger.info("✅ Подключение к базе данных успешно")
-        Base.metadata.create_all(engine)
-        return engine
-    except Exception as e:
-        logger.error(f"❌ Ошибка подключения к базе данных: {e}")
-        raise
+    async def init(self):
+        # Получаем DATABASE_URL из переменных окружения
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url:
+            raise ValueError("DATABASE_URL не найден в переменных окружения")
+        
+        # Заменяем postgresql:// на postgresql+asyncpg:// для асинхронного подключения
+        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
+        self.engine = create_async_engine(database_url, echo=False)
+        self.async_session = sessionmaker(
+            self.engine, class_=AsyncSession, expire_on_commit=False
+        )
+        
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
-def get_session():
-    try:
-        engine = create_engine(Config.DATABASE_URL)
-        Session = sessionmaker(bind=engine)
-        return Session()
-    except Exception as e:
-        logger.error(f"❌ Ошибка создания сессии: {e}")
-        raise
+    def get_session(self):
+        return self.async_session()

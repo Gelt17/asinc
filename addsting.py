@@ -43,7 +43,7 @@ def add_string(file_path):
                 db["Базис поставки"].append(str(df.iloc[idx, 3]))
                 db["Объем Договоров в единицах измерения"].append(str(df.iloc[idx, 4]))
                 db["Обьем Договоров, руб."].append(str(df.iloc[idx, 5]))
-                db["Количество Договоров, шт."].append(str(df.iloc[idx, 14]))
+                db["Количество Договоров, шт."].append(int(str(df.iloc[idx, 14])))
         except Exception:
             continue
 

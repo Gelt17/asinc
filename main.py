@@ -1,42 +1,66 @@
-import parser
-from database import create_database, get_session
-import os
+import asyncio
+import time
+from parser import AsyncSpimexParser
+from database import AsyncDatabase
 from addsting import add_string, extract_date_from_filename
 from models import SpimexTradingResults
-import time
+import os
 
-
-
-def add_db(files):
-    t = 0
-    session = get_session()
-    for i in files:
-        add_s = add_string(f"files/{i}")
-        for j in range(len(add_s["Код Инструмента"])):
-            s = SpimexTradingResults(
-                exchange_product_id = add_s["Код Инструмента"][j],
-                exchange_product_name = add_s["Наименование Инструмента"][j],
-                oil_id = add_s["Код Инструмента"][j][:4],
-                delivery_basis_id = add_s["Код Инструмента"][j][4:7],
-                delivery_basis_name = add_s["Базис поставки"][j],
-                delivery_type_id = add_s["Код Инструмента"][j][-1],
-                volume = add_s["Объем Договоров в единицах измерения"][j],
-                total = add_s["Обьем Договоров, руб."][j],
-                count = add_s["Количество Договоров, шт."][j],
-                date = extract_date_from_filename(i)
-            )
-            
-            session.add(s)
-            t += 1
-        session.commit()
-    print(f"Сделано {t} записей") 
-        
-if __name__ == "__main__":
+async def main():
     start_time = time.time()
-    parser.download_parser()
-    engine = create_database()
-    files = os.listdir('files')
-    add_db(files)
-    end_time = time.time()
-    execution_time = end_time - start_time
-    print(f"Время выполнения программы: {execution_time:.2f} секунд")
+    
+    try:
+        # Скачиваем файлы
+        async with AsyncSpimexParser() as parser:
+            links = await parser.get_links()
+            print(f"Найдено ссылок: {len(links)}")
+            files = await parser.download_all_files(links)
+        
+        # Инициализируем БД
+        db = AsyncDatabase()
+        await db.init()
+        
+        # Парсим и загружаем в БД
+        total_records = 0
+        
+        async with db.get_session() as session:
+            for filename in files:
+                try:
+                    file_data = add_string(f"files/{filename}")
+                    
+                    for i in range(len(file_data["Код Инструмента"])):
+                        record = SpimexTradingResults(
+                            exchange_product_id = file_data["Код Инструмента"][i],
+                exchange_product_name = file_data["Наименование Инструмента"][i],
+                oil_id = file_data["Код Инструмента"][i][:4],
+                delivery_basis_id = file_data["Код Инструмента"][i][4:7],
+                delivery_basis_name = file_data["Базис поставки"][i],
+                delivery_type_id = file_data["Код Инструмента"][i][-1],
+                volume = file_data["Объем Договоров в единицах измерения"][i],
+                total = file_data["Обьем Договоров, руб."][i],
+                count = file_data["Количество Договоров, шт."][i],
+                date = extract_date_from_filename(filename)
+                        )
+                        session.add(record)
+                        total_records += 1
+                    
+                    await session.commit()
+                    print(f"✅ Обработан файл: {filename}")
+                    
+                except Exception as e:
+                    print(f"❌ Ошибка при обработке файла {filename}: {e}")
+                    await session.rollback()
+        
+        end_time = time.time()
+        execution_time = end_time - start_time
+        print(f"Время выполнения: {execution_time:.2f} секунд")
+        print(f"Добавлено записей: {total_records}")
+        
+        return execution_time, total_records
+    
+    except Exception as e:
+        print(f"❌ Критическая ошибка: {e}")
+        return 0, 0
+
+if __name__ == "__main__":
+    execution_time, total_records = asyncio.run(main())
